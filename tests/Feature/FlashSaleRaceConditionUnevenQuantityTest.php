@@ -34,7 +34,7 @@ class FlashSaleRaceConditionTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_flash_sale_purchase_prevents_negative_inventory_under_concurrent_load(): void
+    public function test_flash_sale_purchase_prevents_negative_inventory_with_multi_unit_requests(): void
     {
         DB::table("order_items")->delete();
         DB::table("orders")->delete();
@@ -43,6 +43,7 @@ class FlashSaleRaceConditionTest extends TestCase
         DB::table("products")->delete();
 
         $stock = 5;
+        $qtyPerRequest = 3;
         $concurrentRequests = 20;
 
         $product = Product::factory()->create(["price" => 20000]);
@@ -57,15 +58,19 @@ class FlashSaleRaceConditionTest extends TestCase
             "discounted_price" => 12000,
         ]);
 
+        $expectedSuccessCount = intdiv($stock, $qtyPerRequest);
+        $expectedRemainingStock = $stock % $qtyPerRequest;
+        $expectedConflictCount = $concurrentRequests - $expectedSuccessCount;
+
         $client = new Client(["base_uri" => $this->baseUri]);
 
-        $requests = function () use ($flashSale, $concurrentRequests) {
+        $requests = function () use ($flashSale, $concurrentRequests, $qtyPerRequest) {
             for ($i = 0; $i < $concurrentRequests; $i++) {
                 yield new Request(
                     "POST",
                     "/api/flash-sales/{$flashSale->id}/purchase",
                     ["Content-Type" => "application/json", "Accept" => "application/json"],
-                    json_encode(["quantity" => 1])
+                    json_encode(["quantity" => $qtyPerRequest])
                 );
             }
         };
@@ -88,38 +93,39 @@ class FlashSaleRaceConditionTest extends TestCase
         ]);
 
         $pool->promise()->wait();
-
+        
         $finalQuantity = DB::table("inventories")
             ->where("product_id", $product->id)
             ->value("quantity");
-
+        
         $orderItemCount = DB::table("order_items")
             ->where("flash_sale_id", $flashSale->id)
             ->count();
-
+        
         fwrite(STDERR, "\n--- Race Condition Test Results ---\n");
-        fwrite(STDERR, "Successful purchases:     {$successCount} (expected {$stock})\n");
-        fwrite(STDERR, "Rejected purchases:       {$conflictCount} (expected " . ($concurrentRequests - $stock) . ")\n");
-        fwrite(STDERR, "Final inventory quantity: {$finalQuantity} (expected 0)\n");
-        fwrite(STDERR, "Order item rows created:  {$orderItemCount} (expected {$stock})\n");
+        fwrite(STDERR, "Requested qty per request: {$qtyPerRequest}\n");
+        fwrite(STDERR, "Successful purchases:      {$successCount} (expected {$expectedSuccessCount})\n");
+        fwrite(STDERR, "Rejected purchases:        {$conflictCount} (expected {$expectedConflictCount})\n");
+        fwrite(STDERR, "Final inventory quantity:  {$finalQuantity} (expected {$expectedRemainingStock})\n");
+        fwrite(STDERR, "Order item rows created:   {$orderItemCount} (expected {$expectedSuccessCount})\n");
         fwrite(STDERR, "------------------------------------\n");
         
         $this->assertEquals(
-            $stock,
+            $expectedSuccessCount,
             $successCount,
-            "Expected exactly {$stock} successful purchases, got {$successCount}."
+            "Expected {$expectedSuccessCount} successful purchases (stock {$stock} ÷ qty {$qtyPerRequest}), got {$successCount}."
         );
 
         $this->assertEquals(
-            $concurrentRequests - $stock,
+            $expectedConflictCount,
             $conflictCount,
-            "Expected " . ($concurrentRequests - $stock) . " rejected purchases, got {$conflictCount}."
+            "Expected {$expectedConflictCount} rejected purchases, got {$conflictCount}."
         );
-        
+
         $this->assertEquals(
-            0,
+            $expectedRemainingStock,
             $finalQuantity,
-            "Expected final inventory to be exactly 0, got {$finalQuantity}."
+            "Expected {$expectedRemainingStock} units left over (unfulfillable remainder), got {$finalQuantity}."
         );
 
         $this->assertGreaterThanOrEqual(
@@ -127,11 +133,11 @@ class FlashSaleRaceConditionTest extends TestCase
             $finalQuantity,
             "Inventory must never go negative."
         );
-            
+
         $this->assertEquals(
-            $stock,
+            $expectedSuccessCount,
             $orderItemCount,
-            "Expected {$stock} order_item rows, found {$orderItemCount}."
+            "Expected {$expectedSuccessCount} order_item rows, found {$orderItemCount}."
         );
     }
 }

@@ -19,7 +19,6 @@ class FlashSaleResource extends JsonResource
             "product_id"          => $this->product_id,
             "product_name"        => $this->whenLoaded("product", fn () => $this->product->name),
             "discounted_price"    => $this->discounted_price,
-            "quantity_available"  => $this->quantity_available,
             "starts_at"           => $this->starts_at,
             "ends_at"             => $this->ends_at,
             "is_active"           => $this->isActive(),

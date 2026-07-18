@@ -14,7 +14,6 @@ class FlashSale extends Model
     protected $fillable = [
         'product_id',
         'discounted_price',
-        'quantity_available',
         'starts_at',
         'ends_at',
     ];
@@ -37,7 +36,6 @@ class FlashSale extends Model
     public function isActive(): bool
     {
         $now = now();
-        return $this->quantity_available > 0
-            && $now->between($this->starts_at, $this->ends_at);
+        return $now->between($this->starts_at, $this->ends_at);
     }
 }

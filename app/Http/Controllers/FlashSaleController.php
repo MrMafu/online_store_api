@@ -28,7 +28,6 @@ class FlashSaleController extends Controller
         $validated = Validator::make($request->all(), [
             "product_id"         => ["required", "exists:products,id"],
             "discounted_price"   => ["required", "integer", "min:0"],
-            "quantity_available" => ["required", "integer", "min:1"],
             "starts_at"          => ["required", "date"],
             "ends_at"            => ["required", "date", "after:starts_at"],
         ])->validate();
@@ -63,10 +62,10 @@ class FlashSaleController extends Controller
         }
 
         $result = DB::transaction(function () use ($flashSale, $qty) {
-            $updated = DB::table("flash_sales")
-                ->where("id", $flashSale->id)
-                ->where("quantity_available", ">=", $qty)
-                ->decrement("quantity_available", $qty);
+            $updated = DB::table("inventories")
+                ->where("product_id", $flashSale->product_id)
+                ->where("quantity", ">=", $qty)
+                ->decrement("quantity", $qty);
 
             if ($updated === 0) {
                 return null;
@@ -86,7 +85,7 @@ class FlashSaleController extends Controller
 
         if ($result === null) {
             return response()->json([
-                "message" => "Flash sale item is sold out.",
+                "message" => "Product is out of stock.",
             ], 409);
         }
 

@@ -19,12 +19,17 @@ class FlashSaleRaceConditionTest extends TestCase
     {
         parent::setUp();
 
+        /*
+        Boot a real, separate server process so requests below are handled
+        concurrently instead of sequentially on the test's own connection.
+        */
         $this->serverProcess = new Process([
             "php", "artisan", "serve", "--port=8181",
         ], base_path());
 
         $this->serverProcess->start();
 
+        // Give the background PHP server a moment to boot
         usleep(1_500_000);
     }
 
@@ -36,6 +41,7 @@ class FlashSaleRaceConditionTest extends TestCase
 
     public function test_flash_sale_purchase_prevents_negative_inventory_under_concurrent_load(): void
     {
+        // Manually clear the tables to ensure a completely clean state
         DB::table("order_items")->delete();
         DB::table("orders")->delete();
         DB::table("flash_sales")->delete();
@@ -59,6 +65,7 @@ class FlashSaleRaceConditionTest extends TestCase
 
         $client = new Client(["base_uri" => $this->baseUri]);
 
+        // Queue up 20 purchase requests for 1 unit each, all fighting over 5 units of stock
         $requests = function () use ($flashSale, $concurrentRequests) {
             for ($i = 0; $i < $concurrentRequests; $i++) {
                 yield new Request(
@@ -73,6 +80,7 @@ class FlashSaleRaceConditionTest extends TestCase
         $successCount = 0;
         $conflictCount = 0;
 
+        // Fire all requests essentially at once, tallying how many succeeded and how many rejected
         $pool = new Pool($client, $requests(), [
             "concurrency" => $concurrentRequests,
             "fulfilled" => function ($response) use (&$successCount, &$conflictCount) {
@@ -104,6 +112,7 @@ class FlashSaleRaceConditionTest extends TestCase
         fwrite(STDERR, "Order item rows created:  {$orderItemCount} (expected {$stock})\n");
         fwrite(STDERR, "------------------------------------\n");
         
+        // Exactly 5 of the 20 requests should have won the race
         $this->assertEquals(
             $stock,
             $successCount,
@@ -116,6 +125,7 @@ class FlashSaleRaceConditionTest extends TestCase
             "Expected " . ($concurrentRequests - $stock) . " rejected purchases, got {$conflictCount}."
         );
         
+        // Stock should be fully depleted, not left over and never negative
         $this->assertEquals(
             0,
             $finalQuantity,
@@ -127,7 +137,8 @@ class FlashSaleRaceConditionTest extends TestCase
             $finalQuantity,
             "Inventory must never go negative."
         );
-            
+
+        // Each successful purchase should have created exactly one order item, no more, no less
         $this->assertEquals(
             $stock,
             $orderItemCount,

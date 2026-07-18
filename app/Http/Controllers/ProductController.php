@@ -29,6 +29,7 @@ class ProductController extends Controller
             "quantity" => ["required", "integer", "min:0"],
         ])->validate();
 
+        // Ensure both product and its initial inventory are created together atomically
         $product = DB::transaction(function () use ($validated) {
             $product = Product::create([
                 "name"  => $validated["name"],

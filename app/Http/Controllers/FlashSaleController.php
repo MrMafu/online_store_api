@@ -55,18 +55,21 @@ class FlashSaleController extends Controller
 
         $qty = $validated["quantity"] ?? 1;
 
+        // Handler if flash sale has already ended
         if (!$flashSale->isActive()) {
             return response()->json([
                 "message" => "This flash sale is not currently active.",
             ], 422);
         }
 
+        // Deduct stock atomically to prevent overselling, then log the completed order
         $result = DB::transaction(function () use ($flashSale, $qty) {
             $updated = DB::table("inventories")
                 ->where("product_id", $flashSale->product_id)
                 ->where("quantity", ">=", $qty)
                 ->decrement("quantity", $qty);
 
+            // If zero rows were updated, it means stock was insufficient
             if ($updated === 0) {
                 return null;
             }
@@ -83,6 +86,7 @@ class FlashSaleController extends Controller
             return $order;
         });
 
+        // Handle the aborted transaction failure
         if ($result === null) {
             return response()->json([
                 "message" => "Product is out of stock.",

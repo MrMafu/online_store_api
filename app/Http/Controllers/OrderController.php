@@ -25,45 +25,49 @@ class OrderController extends Controller
     public function store(Request $request)
     {
         $validated = Validator::make($request->all(), [
-            'items'              => ['required', 'array', 'min:1'],
-            'items.*.product_id' => ['required', 'exists:products,id'],
-            'items.*.quantity'   => ['required', 'integer', 'min:1'],
+            "items"              => ["required", "array", "min:1"],
+            "items.*.product_id" => ["required", "exists:products,id"],
+            "items.*.quantity"   => ["required", "integer", "min:1"],
         ])->validate();
 
+        // Create the order and process stock deductions for all items as a single atomic operation
         $result = DB::transaction(function () use ($validated) {
-            $order = Order::create(['status' => 'pending']);
+            $order = Order::create(["status" => "pending"]);
 
-            foreach ($validated['items'] as $item) {
-                $updated = DB::table('inventories')
-                    ->where('product_id', $item['product_id'])
-                    ->where('quantity', '>=', $item['quantity'])
-                    ->decrement('quantity', $item['quantity']);
+            foreach ($validated["items"] as $item) {
+                // Decrement stock only if enough quantity exists to prevent overselling
+                $updated = DB::table("inventories")
+                    ->where("product_id", $item["product_id"])
+                    ->where("quantity", ">=", $item["quantity"])
+                    ->decrement("quantity", $item["quantity"]);
 
+                // If zero rows were updated, it means stock was insufficient
                 if ($updated === 0) {
-                    return null; // insufficient stock — abort whole order
+                    return null;
                 }
 
-                $product = Product::find($item['product_id']);
+                $product = Product::find($item["product_id"]);
 
                 $order->items()->create([
-                    'product_id' => $item['product_id'],
-                    'quantity'   => $item['quantity'],
-                    'unit_price' => $product->price,
+                    "product_id" => $item["product_id"],
+                    "quantity"   => $item["quantity"],
+                    "unit_price" => $product->price,
                 ]);
             }
 
-            $order->update(['status' => 'completed']);
+            $order->update(["status" => "completed"]);
 
             return $order;
         });
 
+        // Handle the aborted transaction failure
         if ($result === null) {
             return response()->json([
-                'message' => 'One or more items are out of stock.',
+                "message" => "One or more items are out of stock.",
             ], 409);
         }
 
-        return (new OrderResource($result->load('items')))
+        return (new OrderResource($result->load("items")))
             ->response()
             ->setStatusCode(201);
     }
@@ -73,7 +77,7 @@ class OrderController extends Controller
      */
     public function show(Order $order)
     {
-        return new OrderResource($order->load('items'));
+        return new OrderResource($order->load("items"));
     }
 
     /**

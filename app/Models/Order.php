@@ -11,7 +11,7 @@ class Order extends Model
     use HasFactory;
 
     protected $fillable = [
-        'status',
+        "status",
     ];
 
     public function items(): HasMany

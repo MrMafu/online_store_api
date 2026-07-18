@@ -12,15 +12,15 @@ class FlashSale extends Model
     use HasFactory;
 
     protected $fillable = [
-        'product_id',
-        'discounted_price',
-        'starts_at',
-        'ends_at',
+        "product_id",
+        "discounted_price",
+        "starts_at",
+        "ends_at",
     ];
 
     protected $casts = [
-        'starts_at' => 'datetime',
-        'ends_at'   => 'datetime',
+        "starts_at" => "datetime",
+        "ends_at"   => "datetime",
     ];
 
     public function product(): BelongsTo
@@ -33,6 +33,7 @@ class FlashSale extends Model
         return $this->hasMany(OrderItem::class);
     }
 
+    // Used by purchase() to reject purchases outside the sale's time window
     public function isActive(): bool
     {
         $now = now();

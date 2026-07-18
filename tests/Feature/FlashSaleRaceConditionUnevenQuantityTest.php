@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
-class FlashSaleRaceConditionTest extends TestCase
+class FlashSaleRaceConditionUnevenQuantityTest extends TestCase
 {
     protected Process $serverProcess;
     protected string $baseUri = "http://127.0.0.1:8181";
@@ -19,12 +19,17 @@ class FlashSaleRaceConditionTest extends TestCase
     {
         parent::setUp();
 
+        /*
+        Boot a real, separate server process so requests below are handled
+        concurrently instead of sequentially on the test's own connection.
+        */
         $this->serverProcess = new Process([
             "php", "artisan", "serve", "--port=8181",
         ], base_path());
 
         $this->serverProcess->start();
 
+        // Give the background PHP server a moment to boot
         usleep(1_500_000);
     }
 
@@ -36,6 +41,7 @@ class FlashSaleRaceConditionTest extends TestCase
 
     public function test_flash_sale_purchase_prevents_negative_inventory_with_multi_unit_requests(): void
     {
+        // Manually clear the tables to ensure a completely clean state
         DB::table("order_items")->delete();
         DB::table("orders")->delete();
         DB::table("flash_sales")->delete();
@@ -58,12 +64,17 @@ class FlashSaleRaceConditionTest extends TestCase
             "discounted_price" => 12000,
         ]);
 
+        /*
+        Stock doesn't divide evenly by qtyPerRequest, so only 1 request can be
+        fully satisfied. The remaining 2 units should stay untouched, not oversold
+        */
         $expectedSuccessCount = intdiv($stock, $qtyPerRequest);
         $expectedRemainingStock = $stock % $qtyPerRequest;
         $expectedConflictCount = $concurrentRequests - $expectedSuccessCount;
 
         $client = new Client(["base_uri" => $this->baseUri]);
 
+        // Queue up 20 purchase requests, each asking for 3 units against 5 in stock
         $requests = function () use ($flashSale, $concurrentRequests, $qtyPerRequest) {
             for ($i = 0; $i < $concurrentRequests; $i++) {
                 yield new Request(
@@ -78,6 +89,7 @@ class FlashSaleRaceConditionTest extends TestCase
         $successCount = 0;
         $conflictCount = 0;
 
+        // Fire all requests essentially at once, tallying how many succeeded and how many rejected
         $pool = new Pool($client, $requests(), [
             "concurrency" => $concurrentRequests,
             "fulfilled" => function ($response) use (&$successCount, &$conflictCount) {
@@ -110,6 +122,7 @@ class FlashSaleRaceConditionTest extends TestCase
         fwrite(STDERR, "Order item rows created:   {$orderItemCount} (expected {$expectedSuccessCount})\n");
         fwrite(STDERR, "------------------------------------\n");
         
+        // Only enough requests to fully consume the stock should succeed
         $this->assertEquals(
             $expectedSuccessCount,
             $successCount,
@@ -122,6 +135,7 @@ class FlashSaleRaceConditionTest extends TestCase
             "Expected {$expectedConflictCount} rejected purchases, got {$conflictCount}."
         );
 
+        // The leftover remainder should stay in stock, not get consumed or driven negative
         $this->assertEquals(
             $expectedRemainingStock,
             $finalQuantity,

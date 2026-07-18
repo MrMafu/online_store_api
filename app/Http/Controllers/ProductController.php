@@ -15,7 +15,7 @@ class ProductController extends Controller
      */
     public function index()
     {
-        return ProductResource::collection(Product::with("inventory"));
+        return ProductResource::collection(Product::with("inventory")->get());
     }
 
     /**
